@@ -1,0 +1,251 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===================== ENUMS =====================
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  SPECIALIST
+  RECEPTIONIST
+}
+
+enum Plan {
+  BASIC
+  PRO
+  PREMIUM
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+  FAILED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  PAST_DUE
+  TRIALING
+}
+
+// ===================== MODELS =====================
+
+model Business {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  type        String   // peluqueria, fisioterapia, spa, etc.
+  address     String?
+  phone       String?
+  email       String
+  logo        String?
+  description String?
+  timezone    String   @default("America/Bogota")
+  currency    String   @default("COP")
+  plan        Plan     @default(BASIC)
+  stripeCustomerId String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users         User[]
+  specialists   Specialist[]
+  appointments  Appointment[]
+  services      Service[]
+  clients       Client[]
+  invoices      Invoice[]
+  subscription  Subscription?
+  payments      Payment[]
+
+  @@map("businesses")
+}
+
+model User {
+  id         String   @id @default(cuid())
+  email      String   @unique
+  password   String
+  name       String
+  role       Role     @default(ADMIN)
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  isActive   Boolean  @default(true)
+  lastLogin  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Specialist {
+  id           String   @id @default(cuid())
+  name         String
+  email        String?
+  phone        String?
+  photo        String?
+  bio          String?
+  commission   Float    @default(0) // porcentaje 0-100
+  businessId   String
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  appointments Appointment[]
+  schedules    Schedule[]
+  specialistServices SpecialistService[]
+
+  @@map("specialists")
+}
+
+model Service {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  duration    Int      // minutos
+  price       Float
+  category    String?
+  color       String?  @default("#6366f1")
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  appointments Appointment[]
+  specialistServices SpecialistService[]
+
+  @@map("services")
+}
+
+model SpecialistService {
+  id           String     @id @default(cuid())
+  specialistId String
+  specialist   Specialist @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  serviceId    String
+  service      Service    @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([specialistId, serviceId])
+  @@map("specialist_services")
+}
+
+model Schedule {
+  id           String     @id @default(cuid())
+  specialistId String
+  specialist   Specialist @relation(fields: [specialistId], references: [id], onDelete: Cascade)
+  dayOfWeek    Int        // 0=Dom, 1=Lun, ... 6=Sab
+  startTime    String     // "09:00"
+  endTime      String     // "18:00"
+  isActive     Boolean    @default(true)
+
+  @@map("schedules")
+}
+
+model Client {
+  id         String   @id @default(cuid())
+  name       String
+  email      String?
+  phone      String?
+  notes      String?
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  appointments Appointment[]
+
+  @@map("clients")
+}
+
+model Appointment {
+  id           String            @id @default(cuid())
+  businessId   String
+  business     Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  specialistId String
+  specialist   Specialist        @relation(fields: [specialistId], references: [id])
+  serviceId    String
+  service      Service           @relation(fields: [serviceId], references: [id])
+  clientId     String?
+  client       Client?           @relation(fields: [clientId], references: [id])
+  clientName   String?
+  clientPhone  String?
+  clientEmail  String?
+  date         DateTime
+  endDate      DateTime
+  status       AppointmentStatus @default(PENDING)
+  notes        String?
+  price        Float
+  paymentStatus PaymentStatus   @default(PENDING)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  payment Payment?
+
+  @@map("appointments")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  businessId    String
+  business      Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointmentId String?       @unique
+  appointment   Appointment?  @relation(fields: [appointmentId], references: [id])
+  amount        Float
+  platformFee   Float         @default(0) // comision de la plataforma
+  specialistFee Float         @default(0) // pago al especialista
+  businessNet   Float         @default(0) // lo que queda para el negocio
+  currency      String        @default("COP")
+  status        PaymentStatus @default(PENDING)
+  stripePaymentId String?
+  method        String?       // card, cash, transfer
+  createdAt     DateTime      @default(now())
+
+  @@map("payments")
+}
+
+model Invoice {
+  id         String        @id @default(cuid())
+  businessId String
+  business   Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  amount     Float
+  tax        Float         @default(0)
+  total      Float
+  status     PaymentStatus @default(PENDING)
+  stripeInvoiceId String?
+  dueDate    DateTime?
+  paidAt     DateTime?
+  createdAt  DateTime      @default(now())
+
+  @@map("invoices")
+}
+
+model Subscription {
+  id               String             @id @default(cuid())
+  businessId       String             @unique
+  business         Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  plan             Plan               @default(BASIC)
+  stripeSubId      String?
+  status           SubscriptionStatus @default(TRIALING)
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  cancelAtPeriodEnd  Boolean          @default(false)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@map("subscriptions")
+}
